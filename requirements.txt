@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+gtts
+python-multipart
+python-dotenv
