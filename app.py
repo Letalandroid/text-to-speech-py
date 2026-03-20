@@ -1,48 +1,30 @@
 import os
 import uuid
-import threading
-import time
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
 from fastapi.responses import FileResponse
 from gtts import gTTS
 from dotenv import load_dotenv
 
-# Cargar variables de entorno
 load_dotenv()
 
-# Configuración desde .env
 API_KEY = os.getenv("API_KEY")
 AUDIO_DIR = "audios"
-MAX_FILE_AGE = int(os.getenv("MAX_FILE_AGE", 60))
 
-# Validación básica
-if not API_KEY:
-    raise ValueError("API_KEY no está definida en el .env")
-
-# Crear carpeta si no existe
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
 app = FastAPI()
 
-def limpiar_audios():
-    ahora = time.time()
-    for archivo in os.listdir(AUDIO_DIR):
-        ruta = os.path.join(AUDIO_DIR, archivo)
-        try:
-            if os.path.isfile(ruta):
-                edad = ahora - os.path.getmtime(ruta)
-                if edad > MAX_FILE_AGE:
-                    os.remove(ruta)
-        except Exception as e:
-            print(f"Error eliminando {ruta}: {e}")
-
-def lanzar_limpieza():
-    hilo = threading.Thread(target=limpiar_audios, daemon=True)
-    hilo.start()
+def eliminar_archivo(path: str):
+    """Elimina un archivo después de enviarlo"""
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+            print(f"Archivo eliminado: {path}")
+    except Exception as e:
+        print(f"Error eliminando {path}: {e}")
 
 @app.post("/tts")
-async def generar_tts(request: Request):
-    # 🔐 Seguridad por API Key desde .env
+async def generar_tts(request: Request, background_tasks: BackgroundTasks):
     api_key = request.headers.get("x-api-key")
     if api_key != API_KEY:
         raise HTTPException(status_code=401, detail="No autorizado")
@@ -53,9 +35,6 @@ async def generar_tts(request: Request):
     if not texto:
         raise HTTPException(status_code=400, detail="Falta el campo 'text'")
 
-    if len(texto) > 1000:  # 🔒 protección básica
-        raise HTTPException(status_code=413, detail="Texto demasiado largo")
-
     try:
         filename = f"{uuid.uuid4()}.mp3"
         filepath = os.path.join(AUDIO_DIR, filename)
@@ -63,7 +42,8 @@ async def generar_tts(request: Request):
         tts = gTTS(text=texto, lang='es')
         tts.save(filepath)
 
-        lanzar_limpieza()
+        # 🔥 Programar eliminación después de responder
+        background_tasks.add_task(eliminar_archivo, filepath)
 
         return FileResponse(
             path=filepath,
